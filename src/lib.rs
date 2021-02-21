@@ -2,14 +2,14 @@
 //!
 //! This is compatible with `embedded-hal`.
 //!
-//! Right now, only the SPI interface is supported. In the future, support will be
-//! added for I2C/TWI and UART interfaces
+//! Right now, only the SPI or I2C interfaces are supported. In the future,
+//! support will be added for UART interfaces
 
 #![no_std]
 
-use embedded_hal::blocking::spi::Write;
-use embedded_hal::digital::OutputPin;
 use bitflags::bitflags;
+pub mod i2c;
+pub mod spi;
 
 bitflags! {
     /// A bit packed structure representing days of the week
@@ -44,62 +44,44 @@ mod command {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum Error<T> {
-    SpimError(T),
+pub enum Error<I> {
+    Interface(I),
     CursorOutOfRange,
     DigitOutOfRange,
 }
 
-pub struct SevSegSpim<SPIM, CS> {
-    spim: SPIM,
-    csn: CS,
-}
+pub trait SevenSegInterface {
+    /// A single error type used by the interface
+    type InterfaceError;
 
-impl<SPIM, CS> SevSegSpim<SPIM, CS>
-    where
-        SPIM: Write<u8>,
-        CS:  OutputPin,
-{
-    /// Create a new SparkFun Serial Seven Segment display using a SPI (Master)
-    /// port. The SPI port has a maximum frequency of 250kHz, and must be in Mode 0.
-    pub fn new(spim: SPIM, csn: CS) -> Self {
-        Self {
-            spim,
-            csn,
-        }
-    }
+    /// Sending commands to the interface
+    fn send(&mut self, data: &[u8]) -> Result<(), Error<Self::InterfaceError>>;
 
     /// Set the digit cursor to a particular location
     /// `col` may be 0..=3, from left to right.
-    pub fn set_cursor(&mut self, col: u8) -> Result<(), Error<SPIM::Error>> {
+    fn set_cursor(&mut self, col: u8) -> Result<(), Error<Self::InterfaceError>> {
         if col >= 4 {
             return Err(Error::CursorOutOfRange);
         }
 
-        self.send(&[
-            command::CURSOR_CTL,
-            col,
-        ])
+        self.send(&[command::CURSOR_CTL, col])
     }
 
     /// Set the brightness for the display. The datasheet says that 100 is the
     /// brightest, however my device gets brighter with values above 100 (up to 255).
     /// Your mileage may vary.
-    pub fn set_brightness(&mut self, bright: u8) -> Result<(), Error<SPIM::Error>> {
-        self.send(&[
-            command::BRIGHTNESS_CTL,
-            bright
-        ])
+    fn set_brightness(&mut self, bright: u8) -> Result<(), Error<Self::InterfaceError>> {
+        self.send(&[command::BRIGHTNESS_CTL, bright])
     }
 
     /// Completely clear the display
-    pub fn clear(&mut self) -> Result<(), Error<SPIM::Error>> {
+    fn clear(&mut self) -> Result<(), Error<Self::InterfaceError>> {
         self.send(&[command::CLEAR_DISPLAY])
     }
 
     /// Write a digit to the curent cursor position. This also
     /// increments the cursor position
-    pub fn write_digit(&mut self, digit: u8) -> Result<(), Error<SPIM::Error>> {
+    fn write_digit(&mut self, digit: u8) -> Result<(), Error<Self::InterfaceError>> {
         if digit > 0x0F {
             return Err(Error::DigitOutOfRange);
         }
@@ -108,20 +90,20 @@ impl<SPIM, CS> SevSegSpim<SPIM, CS>
     }
 
     /// Write the requested punctuation to the display. This does not take
-    /// the current sPunctuationFlagstate into account, so any unset flags in `punct_flags`
+    /// the current state into account, so any unset flags in `punct_flags`
     /// will turn the corresponding LEDs off.
-    pub fn write_punctuation(&mut self, punct_flags: PunctuationFlags) -> Result<(), Error<SPIM::Error>> {
-        self.send(&[
-            command::DECIMAL_CTL,
-            punct_flags.bits()
-        ])
+    fn write_punctuation(
+        &mut self,
+        punct_flags: PunctuationFlags,
+    ) -> Result<(), Error<Self::InterfaceError>> {
+        self.send(&[command::DECIMAL_CTL, punct_flags.bits()])
     }
 
     /// Write the requested digits to the display, starting at the current
     /// cursor position. Each digit must be in the range 0x0..=0xF, and up
     /// to 4 digits may be updated at once. The cursor is incremented after
     /// each digit
-    pub fn write_digits(&mut self, digits: &[u8]) -> Result<(), Error<SPIM::Error>> {
+    fn write_digits(&mut self, digits: &[u8]) -> Result<(), Error<Self::InterfaceError>> {
         // Too many digits?
         if digits.len() > 4 {
             return Err(Error::CursorOutOfRange);
@@ -140,7 +122,7 @@ impl<SPIM, CS> SevSegSpim<SPIM, CS>
     /// Write the number to the display. The number will be left-filled
     /// with zeroes if necessary. After this function, the cursor
     /// will be at position 0.
-    pub fn set_num(&mut self, num: u16) -> Result<(), Error<SPIM::Error>> {
+    fn set_num(&mut self, num: u16) -> Result<(), Error<Self::InterfaceError>> {
         if num > 9999 {
             return Err(Error::DigitOutOfRange);
         }
@@ -155,18 +137,5 @@ impl<SPIM, CS> SevSegSpim<SPIM, CS>
         ];
 
         self.send(&data)
-    }
-
-    fn send(&mut self, data: &[u8]) -> Result<(), Error<SPIM::Error>> {
-        self.csn.set_low();
-
-        let ret = self.spim
-            .write(&data)
-            .map_err(|e| Error::SpimError(e))
-            .map(|_| ());
-
-        self.csn.set_high();
-
-        ret
     }
 }
