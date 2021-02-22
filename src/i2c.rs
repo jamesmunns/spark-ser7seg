@@ -2,6 +2,7 @@ use crate::{Error, SevenSegInterface};
 use embedded_hal::blocking::i2c::Write;
 
 #[non_exhaustive]
+#[derive(Debug, Eq, PartialEq)]
 pub enum I2cError<I2C> {
     I2c(I2C),
 }

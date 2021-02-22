@@ -20,6 +20,7 @@ bitflags! {
         const DOT_RIGHT_OF_4             = 0b0000_1000;
         const DOTS_COLON                 = 0b0001_0000;
         const APOSTROPHE_BETWEEN_3_AND_4 = 0b0010_0000;
+        const NONE                       = 0b0000_0000;
     }
 }
 
@@ -128,6 +129,10 @@ pub trait SevenSegInterface {
         }
 
         self.set_cursor(0)?;
+
+        // TODO: We seem to need roughly 15uS between
+        // back-to-back commands. How should I handle this?
+        // Failure to do so can cause a potential NACK.
 
         let data: [u8; 4] = [
             (num / 1000) as u8,
